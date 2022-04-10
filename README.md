@@ -36,6 +36,7 @@ The format of a S3 path looks like this:`[bucket-name]/backups/[hostname]/YYYY-M
 
 ## Installing pi2s3
 
+Get the files
 ```bash
 git clone --depth 1 https://github.com/neutralvibes/pi2s3.git
 cd pi2s3
@@ -44,9 +45,9 @@ cp scripts/samples/* scripts/
 chmod +x pi2s3 scripts/*
 ```
 
-### Configuring pi2s3
+Edit `config/backup.cfg` and provide the name of the bucket that will be receiving your backup data. 
 
-Edit `config/backup.cfg` and provide the name of the bucket that will be receiving your backup data. It is important to look through the file as there are other options such as `KEEP_BACKUP_WEEKS` to handle rotation, or `CHECK_ROOT` to force root only execution.
+It is important to look through the file as there are other options such as `KEEP_BACKUP_WEEKS` to handle rotation, or `CHECK_ROOT` to force root only execution.
 
 ### Get S3cmd
 
@@ -54,7 +55,7 @@ Edit `config/backup.cfg` and provide the name of the bucket that will be receivi
 
 [s3cmd](https://s3tools.org/s3cmd) is a python utility widely used to write to and from S3 storage. `pi2s3` uses the `s3cmd` utility to communicate with your chosen S3 compatible storage provider.
 
-Let's install it.
+Install it.
 
 ```bash
 sudo pip install pip --upgrade
@@ -71,6 +72,7 @@ Further information about the `s3cmd` tool can be obtained from https://s3tools.
 
 *Note if your storage provider does not support dns buckets hit [space] + [enter] on this option*
 
+#### Create a bucket
 Once you have configured s3cmd if the bucket you wish to save the data into *does not exist* you need to create it as `pi2s3` needs a bucket that already exists.
 
 ```bash
@@ -84,6 +86,24 @@ Edit `config/include_list.txt` which is where you place the paths to names of th
 ### Excluding files/folders
 
 Files/folders you wish to be excluded should be placed one per line into `config/exclude_list.txt`.
+
+### Command line options
+
+```bash
+
+./pi2s3
+
+# Prints
+pi2s3 0.0.1 - usage
+
+Creates tar backups to S3 storage
+
+Usage:
+    info        pi2s3 info
+    run         Run backup
+    ls          List backup weeks
+    ls  [week]  List contents of week folder
+```
 
 ### Running a backup
 
