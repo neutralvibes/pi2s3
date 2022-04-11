@@ -1,6 +1,6 @@
 # PI2S3 (Backup to S3 Storage)
 
-Create daily tar backups of your data to S3 or compatible storage.
+Create regular compressed tar backups of your data to S3 or compatible storage.
 
 Features:
 
@@ -24,6 +24,8 @@ As with any backup solution, it is always advisable to test, and check regularly
 ## How it works
 
 A full backup is performed at the beginning of each week  (Monday) followed by differentials known as `snapshots` each day for the remaining days. `pi2s3` checks if a full backup has been performed that week regardless of the current day and if not one will be created instead of a snapshot.
+
+It is totally up to you how often you decide to perform backups, daily, once a week, every few days, scheduled via `cron` or manually.
 
 ### Snapshots
 
@@ -133,7 +135,7 @@ Typing `./pi2s3 info` will show you the settings you have chosen.
 .\pi2s3 run
 ```
 
-Once configured that's all you need to do. Of course once you have it working the way you like, scheduling a cron job would probably be the next thing.
+Once configured that's all you need to do. Of course once you have it working the way you like, scheduling a `cron` job may well be the next thing.
 
 ### Tasks before & after backup
 
@@ -154,7 +156,7 @@ You can of course use the `s3cmd` tool, but for convenience `pi2s3` can save you
 .\pi2s3 ls
 ```
 
-* To list a single week folder created by the backup. You woud use `pi2s3 ls [YYYY-MM-DD]`, the date being the *Monday* of the week in question.
+* To list a single week folder created by the backup. You would use `pi2s3 ls [YYYY-MM-DD]`, the date being the *Monday* of the week in question.
 
 ```bash
 .\pi2s3 ls 2022-04-11
@@ -177,15 +179,53 @@ As a week of backups progresses, snapshot files and their listings will also be 
 The full path to these files can of course be viewed by using `s3cmd ls s3://full-path`
 
 
-### Restoring files from backups
+### Restoring  from backups
 
-Extracting files/folders from the backup without first copying the archive is possible.
+A lot of what is possible depends on your backup schedules. It is up to you if you perform backups daily, once a week, or every few days. Daily backups provide the most protection but require more storage, although `pi2s3` use of `tar` snapshots can significantly reduce these demands.
+
+#### About full restores
+
+As mentioned previously, one full backup is performed weekly with snapshots made for the other days. Any snapshots contain only *changes* from the last *full* backup. So to restore *everything* archived up-to the date in question if archiving daily, there would be no more than *two* restore operations required. Restoring FIRST from the full backup for the week in question, followed by the daily snapshot of the day required within that week. If your backup schedule is only once a week, you can only restore from that full backup.
+
+#### Individual folders/files
+
+If you want to recover files/folders that have been changed or removed, sometimes it may be possible to retrieve them from just a snapshot, particularly although not exclusively if they had been created on a day after the full backup for that period. Otherwise the full backup may be the one to use. Either way, the archive listings automatically created can make finding what you want easier.
+
+#### Archive listings
+
+To aid in any restore, all the folders/files that have been archived are listed conveniently in separate dated files alongside each backup and typically have an extension `tar.gz.lst`. It is much quicker view these listings when deciding which versions to retrieve, than having to create these listing from the tar archive at a later date. I have found the space these files use usually worth creating them ahead of time.
+
+
+##### How to view listings
+
+An example of copying an archive listing to the local machine for viewing.
+
+```bash
+s3cmd get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.tar.gz.lst
+```
+
+You can then use `cat`, `less` or `grep` to view or other operations to determine if a particular archive contains what you require.
+
+An example of viewing without storing a local copy.
+
+```bash
+s3cmd --no-progress get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.tar.gz.lst - | cat
+```
+
+You could exchange the `cat` in the example for `less` or a `grep` if required. Although if you may need to perform multiple of searches/views copying the file locally as mentioned previously would be better.
+
+
+#### Extracting files/folder from a backup
+
+Extracting files/folders from a backup without first making a copy of the archive locally is both possible and often desirable.
 
 Here is a base example you can alter to your needs.
 
 ```bash
 s3cmd --no-progress get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.tar.gz - | sudo tar -xzpv folder-to-get1 folder-to-get2
 ```
+
+The `folder-to-get1 folder-to-get2` are space separated examples of paths to files and/or folders you wish to retrieve from an archive *specified on the left hand side of the line*.
 
 The `--no-progess` flag is important here, to ensure that the `s3cmd` progress notifications don't corrupt the file.
 
