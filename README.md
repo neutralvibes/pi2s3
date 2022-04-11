@@ -13,7 +13,9 @@ Features:
 
 ## Introduction
 
-`pi2s3` is a script I wrote to handle creating off-site backups for a few Raspberry PI's & other Linux based systems. I have found using `pi2s3` gives me more flexibility, while also helping to drastically reduce trauma on a few occasions in the past, I thought others may also find it useful.
+`pi2s3` is a script I wrote to handle creating off-site backups for a few Raspberry PI's, other Linux based systems, and some Virtual Private Servers (VPS) to S3 storage providers, including but not limited to Amazon's.
+
+I have found using `pi2s3` gives me more flexibility, while also helping to drastically reduce trauma on a few occasions in the past, and that  others may also find it useful.
 
 > With some S3 providers offering upwards of 250GB storage for the price of a couple of bars of chocolate a month, including unlimited in/outbound traffic, the barriers for entry are now lower.
 
