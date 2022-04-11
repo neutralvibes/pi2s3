@@ -67,7 +67,7 @@ Further information about the `s3cmd` tool can be obtained from https://s3tools.
 
 ### Create a bucket
 
-Once you have configured s3cmd to use your storage provider, if the bucket you wish to save the data into *does not exist* you need to create it as `pi2s3` needs a bucket that already exists.
+Once you have configured s3cmd to use your storage provider, if the bucket you wish to save the data into *does not exist* you need to create one, as `pi2s3` needs a bucket already in existence.
 
 ```bash
 s3cmd mb s3://new-bucket-name-here
@@ -79,7 +79,7 @@ s3cmd ls s3://new-bucket-name-here
 
 ### Important Note
 
-One thing to be aware of  is that `s3md` stores its configuration files in the users home folder under `~\.s3cfg`. If/when using `pi2s3` as root, which is likely the case, you should copy this file to `/root`
+One thing to be aware of  is that `s3md` stores its configuration files in the users home folder `~\.s3cfg`. If/when using `pi2s3` as root, which is likely the case, you should copy this file to `/root`
 
 
 ## Installing pi2s3
@@ -171,6 +171,8 @@ s3://bucket-name/backups/hostname/2022-04-11/backup.snar-1
 ```
 
 As a week of backups progresses, snapshot files and their listings will also be added to this view.
+
+>You may notice a file ending with `.apt_installed.lst` in my example. This a list of items installed by `apt` on the system at the time. Enabling/disabling the creation of this file is available in the config file.
 
 The full path to these files can of course be viewed by using `s3cmd ls s3://full-path`
 
