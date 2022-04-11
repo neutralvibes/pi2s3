@@ -183,7 +183,7 @@ The full path to these files can of course be viewed by using `s3cmd ls s3://ful
 
 ### Restoring  from backups
 
->To perform any type of file/folder recovery to another host, you need to install `s3cmd` and configure it to point to your bucket first.
+>To perform any type of file/folder recovery to another host, you only need to install `s3cmd` and configure it to point to your S3 provider first.
 
 A lot of what is possible depends on your backup schedules. It is entirely your choice if you perform backups daily, once a week, or every few days. Daily backups provide the most protection but require more storage, although `pi2s3` use of `tar` snapshots can significantly reduce these demands.
 
