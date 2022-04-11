@@ -212,7 +212,7 @@ An example of viewing without storing a local copy.
 s3cmd --no-progress get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.tar.gz.lst - | cat
 ```
 
-You could exchange the `cat` in the example for `less` or a `grep` if required. Although if you may need to perform multiple of searches/views copying the file locally as mentioned previously would be better.
+You could exchange the `cat` in the example for `less` or a `grep` etc. If you may need to perform multiple operations such as searches or views then copying the file locally as mentioned previously would be better.
 
 
 #### Extracting files/folder from a backup
