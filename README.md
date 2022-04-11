@@ -193,7 +193,7 @@ If you want to recover files/folders that have been changed or removed, sometime
 
 #### Archive listings
 
-To aid in any restore, all the folders/files that have been archived are listed conveniently in separate dated files alongside each backup and typically have an extension `tar.gz.lst`. It is much quicker view these listings when deciding which versions to retrieve, than having to create these listing from the tar archive at a later date. I have found the space these files use usually worth creating them ahead of time.
+To aid in any restore, all the folders/files that have been archived are listed conveniently in separate dated files alongside each backup and typically have an extension `tar.gz.lst`. It is much quicker viewing these listings when deciding which versions to retrieve, than having to create these listing from the tar archive at a later date before being able to examine them. I have found the relatively small space these files take up usually worth creating them ahead of time.
 
 
 ##### How to view listings
@@ -204,7 +204,7 @@ An example of copying an archive listing to the local machine for viewing.
 s3cmd get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.tar.gz.lst
 ```
 
-You can then use `cat`, `less` or `grep` to view or other operations to determine if a particular archive contains what you require.
+You can then use `cat`, `less` or `grep` to view it, or other relevant operations to determine if a particular archive contains what you require.
 
 An example of viewing without storing a local copy.
 
