@@ -19,7 +19,7 @@ I have found using `pi2s3` gives me more flexibility, while also helping to dras
 
 > With some S3 providers offering upwards of 250GB storage for the price of a couple of bars of chocolate a month, including unlimited in/outbound traffic, the barriers for entry are now lower.
 
-`pi2s3` creates a tar backup of selected folders/files on a Linux system to a bucket on Amazon S3 storage or compatible services, using battle hardened [s3cmd](https://s3tools.org/s3cmd) to send the data.
+`pi2s3` creates a compressed tar backup of selected folders/files on a Linux system to a bucket on Amazon S3 storage or compatible services, using battle hardened [s3cmd](https://s3tools.org/s3cmd) to send the data.
 
 As with any backup solution, it is always advisable to test, and check regularly that it is performing as expected.
 
@@ -186,7 +186,6 @@ The full path to these files can of course be viewed by using `s3cmd ls s3://ful
 >To perform any type of file/folder recovery to another host, you need to install `s3cmd` and configure it to point to your bucket first.
 
 A lot of what is possible depends on your backup schedules. It is entirely your choice if you perform backups daily, once a week, or every few days. Daily backups provide the most protection but require more storage, although `pi2s3` use of `tar` snapshots can significantly reduce these demands.
-
 
 #### About full restores
 
