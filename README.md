@@ -133,7 +133,7 @@ Typing `./pi2s3 info` will show you the settings you have chosen.
 .\pi2s3 run
 ```
 
-Once configured that's all you need to do. Of course once you have it working they way you like scheduling a cron job would probably be the next thing.
+Once configured that's all you need to do. Of course once you have it working the way you like, scheduling a cron job would probably be the next thing.
 
 ### Tasks before & after backup
 
@@ -154,7 +154,7 @@ You can of course use the `s3cmd` tool, but for convenience `pi2s3` can save you
 .\pi2s3 ls
 ```
 
-* To list a single week folder created by the backup.
+* To list a single week folder created by the backup. You woud use `pi2s3 ls [YYYY-MM-DD]`, the date being the *Monday* of the week in question.
 
 ```bash
 .\pi2s3 ls 2022-04-11
