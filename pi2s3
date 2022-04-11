@@ -9,8 +9,8 @@ set -o pipefail
 
 VERSION=0.0.1
 SCRIPT_NAME=`basename "$0"`
-SCRIPT_PATH="$(cd "$(dirname '$0')"; pwd -P)"
-cd $SCRIPT_PATH
+cd "$(dirname "$0")"
+SCRIPT_PATH=`pwd -P`
 
 showTitles() {
     echo $SCRIPT_NAME $VERSION - $1
