@@ -322,7 +322,7 @@ else
     msg "Either no AFTER backup tasks or not executable."
 fi
 
-[ $statusCode -ne 0 ] && failed
+[ $statusCode -eq 2 ] && failed
 
 #
 # clean up excess log files
