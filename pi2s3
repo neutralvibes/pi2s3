@@ -170,13 +170,13 @@ if [ ! -d "$LOCAL_LOG_PATH" ]; then
     mkdir -p $LOCAL_LOG_PATH
 fi
 
-TMP_FOLDER=$TMP_PATH/${SCRIPT_NAME}_tmp
+TMP_FOLDER="$TMP_PATH/${SCRIPT_NAME}_tmp"
 
 #
 # Check local TMP_FOLDER
 #
 if [ ! -d "$TMP_FOLDER" ]; then
-    msg "FOLDER-NOT-PRESENT Creating folder, $TMP_FOLDER"
+    msg "FOLDER-NOT-PRESENT Creating tmp folder, $TMP_FOLDER"
     mkdir -p $TMP_FOLDER
 else
     msg "Cleaning folder, $TMP_FOLDER"
