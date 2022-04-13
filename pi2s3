@@ -12,13 +12,21 @@ SCRIPT_NAME=`basename "$0"`
 cd "$(dirname "$0")"
 SCRIPT_PATH=`pwd -P`
 
-showTitles() {
-    echo $SCRIPT_NAME $VERSION - $1
+usage() {
+    echo "Usage: $SCRIPT_NAME [option]
+
+Create tar backups to S3 storage
+
+    info        Config info
+    run         Run backup
+    ls	        List backup weeks
+    ls	[week]  List contents of week folder
+"
+    exit 0
 }
 
 if [[ ! -f config/backup.cfg ]]; then
-    showTitles ERROR
-    echo "
+    echo "ERROR-NO-CONFIG
 The configuration file is missing.
 
 Do the following to set this utility up:
@@ -32,52 +40,9 @@ chmod +x pi2s3 scripts/*
     exit 1
 fi
 
-source config/backup.cfg
-
-BACKUPS_ROOT_FOLDER=$BACKUP_BUCKET/$BACKUP_BUCKET_FOLDER
-
-awsPathExists() {
-    local m="S3 PathExists? $1"
-    $S3_CMD info $1 > /dev/null 2>&1
-    [[ $? -eq 0 ]] && return 0
-    return 1
-}
-
-awsGetFile() { $S3_CMD get $1 $2; }
-awsPutFile() { $S3_CMD put $1 $2; }
-
-canIRun() {
-    [ -f "$1" ] && [ -x "$1" ] && return 0
-    return 1
-}
-
-awsPathExists ${BACKUP_BUCKET}
-
-if [ $? -eq 1 ]; then
-    echo "The S3 bucket, $BACKUP_BUCKET, does not exist."
-    echo "Please make sure you have created the bucket OR, edit config/backup.cfg and enter the correct bucket name."
-    exit 1
-fi
-
-usage() {
-    showTitles usage
-echo "
-Creates tar backups to S3 storage
-
-Usage:
-    info        $SCRIPT_NAME info
-    run         Run backup
-    ls	        List backup weeks
-    ls	[week]  List contents of week folder
-"
-    exit 0
-}
-
-showYesNo() { [ $1 -eq 0 ] && echo "no" || echo "yes"; }
-
 showInfo() {
-    showTitles info
     echo -e "
+Version: $VERSION
 Bucket: $BACKUP_BUCKET
 Bucket folder: $BACKUP_BUCKET_FOLDER
 Backup extension: $BACKUP_FILE_EXT
@@ -94,6 +59,60 @@ S3 command: $S3_CMD
 "
     exit 0
 }
+
+showYesNo() { [ $1 -eq 0 ] && echo "no" || echo "yes"; }
+
+msg() {
+    local dte=$(date +"%F %T")
+    echo -e "[$dte] $@"
+    if [ $LOGS_ENABLED -eq 1 ]; then
+        echo -e "[$dte] $@" >>$LOG_FILE
+    fi
+}
+
+elapsedTime() {
+    local st=startSecs
+    local ts=$((SECONDS - st))
+    local seconds=$((ts % 60))
+    local minutes=$((ts / 60 % 60))
+    local hours=$((ts / 60 / 60 % 24))
+    echo $hours hours, $minutes minutes, $seconds seconds
+}
+
+
+failed() {
+    msg "BACKUP-FAILED for host, [$HOSTNAME]"
+    exit 1
+}
+
+awsPathExists() {
+    local m="S3 PathExists? $1"
+    $S3_CMD info $1 > /dev/null 2>&1
+    [[ $? -eq 0 ]] && return 0
+    return 1
+}
+
+awsGetFile() { $S3_CMD get $1 $2; }
+awsPutFile() { $S3_CMD put $1 $2; }
+
+canIRun() {
+    [ -f "$1" ] && [ -x "$1" ] && return 0
+    return 1
+}
+
+source config/backup.cfg
+
+BACKUPS_ROOT_FOLDER=$BACKUP_BUCKET/$BACKUP_BUCKET_FOLDER
+
+
+
+awsPathExists ${BACKUP_BUCKET}
+
+if [ $? -eq 1 ]; then
+    echo "The S3 bucket, $BACKUP_BUCKET, does not exist."
+    echo "Please make sure you have created the bucket AND/OR, edit config/backup.cfg and enter the correct bucket name."
+    exit 1
+fi
 
 [[ -z $1 ]] && usage
 
@@ -131,29 +150,6 @@ if [ -z $LOGS_ENABLED ]; then
     export LOGS_ENABLED=0
 fi
 
-msg() {
-    local dte=$(date +"%F %T")
-    echo -e "[$dte] $@"
-    if [ $LOGS_ENABLED -eq 1 ]; then
-        echo -e "[$dte] $@" >>$LOG_FILE
-    fi
-}
-
-elapsedTime() {
-    local st=startSecs
-    local ts=$((SECONDS - st))
-    local seconds=$((ts % 60))
-    local minutes=$((ts / 60 % 60))
-    local hours=$((ts / 60 / 60 % 24))
-    echo $hours hours, $minutes minutes, $seconds seconds
-}
-
-
-failed() {
-    msg "BACKUP-FAILED for host, [$HOSTNAME]"
-    exit 1
-}
-
 #
 # If Monday create folder and set working folder
 #
@@ -174,15 +170,17 @@ if [ ! -d "$LOCAL_LOG_PATH" ]; then
     mkdir -p $LOCAL_LOG_PATH
 fi
 
+TMP_FOLDER=$TMP_PATH/${SCRIPT_NAME}_tmp
+
 #
-# Check local TMP_PATH
+# Check local TMP_FOLDER
 #
-if [ ! -d "$TMP_PATH" ]; then
-    msg "FOLDER-NOT-PRESENT Creating folder, $TMP_PATH"
-    mkdir -p $TMP_PATH
+if [ ! -d "$TMP_FOLDER" ]; then
+    msg "FOLDER-NOT-PRESENT Creating folder, $TMP_FOLDER"
+    mkdir -p $TMP_FOLDER
 else
-    msg "Cleaning folder, $TMP_PATH"
-    rm $TMP_PATH/*.* > /dev/null 2>&1
+    msg "Cleaning folder, $TMP_FOLDER"
+    rm $TMP_FOLDER/*.* > /dev/null 2>&1
 fi
 
 #
@@ -207,7 +205,7 @@ snar=$BACKUP_FOLDER/$snarName
 #
 # Snapshot file to use for backup.
 #
-useSnar="$TMP_PATH/$snarName"
+useSnar="$TMP_FOLDER/$snarName"
 
 #
 # If the snapshot is present a full backup is already in folder.
@@ -235,8 +233,6 @@ else
     EXCLUSIONS_PARAM="--exclude-from=$EXCLUDE_LIST"
 fi
 
-
-
 msg "You have 10 seconds to abort (ctrl-c) or backup will start.\n"
 sleep 10
 
@@ -256,10 +252,10 @@ if [ $? -eq 0 ]; then
     # get backup snar to do level 1 from
 
     msg "Copying incremental file locally to use."
-    awsGetFile $snar $TMP_PATH/${snarName}-1
+    awsGetFile $snar $TMP_FOLDER/${snarName}-1
 
     # We want to use the copy of the original snar file.
-    useSnar="${TMP_PATH}/${snarName}-1"
+    useSnar="${TMP_FOLDER}/${snarName}-1"
 else
     msg "Incremental file NOT present, will do full backup."
     fn+=_backup_full
@@ -269,13 +265,13 @@ fi
 pathToFile="$BACKUP_FOLDER/${fn}.$BACKUP_FILE_EXT"
 
 # Full path to report
-pathToLog="$TMP_PATH/$fn.$BACKUP_FILE_EXT.log"
+pathToLog="$TMP_FOLDER/$fn.$BACKUP_FILE_EXT.log"
 
 # Full path to log
-pathToReport="$TMP_PATH/$fn.$BACKUP_FILE_EXT.lst"
+pathToReport="$TMP_FOLDER/$fn.lst"
 
 # Fullpath to error log
-pathToErrors="$TMP_PATH/$fn.$BACKUP_FILE_EXT.error.log"
+pathToWarnings="$TMP_FOLDER/$fn.warnings.log"
 
 msg "Running backup....."
 msg "Using snapshot $useSnar"
@@ -285,18 +281,18 @@ msg "Using snapshot $useSnar"
 #
 if [ ! -z $CREATE_APT_INSTALLED ] && [ $CREATE_APT_INSTALLED -eq 1 ]; then
     msg "Saving list of APT packages installed."
-    sudo apt list --installed > $TMP_PATH/$fn.apt_installed.lst
+    sudo apt list --installed | gzip -9 > $TMP_FOLDER/$fn.apt_installed.lst.gz
 else
     msg "Create APT installed list, disabled."
 fi
 
 sudo /bin/tar -czpSva \
-    --exclude="$TMP_PATH" \
+    --exclude="$TMP_FOLDER" \
     $EXCLUSIONS_PARAM \
     --files-from=$INCLUDE_LIST \
     --totals \
     --index-file="$pathToReport" \
-    --listed-incremental=$useSnar 2> $TMP_PATH/$fn.warnings.log |
+    --listed-incremental=$useSnar 2> $pathToWarnings |
     awsPutFile - $pathToFile
 
 statusCode=$?
@@ -304,8 +300,15 @@ statusCode=$?
 msg "Backup status code: $statusCode"
 
 if [ $statusCode -ne 2 ]; then
+    
+    # Compress index list
+    gzip -9 $pathToReport
+
+    # Compress warnings
+    gzip -9 $pathToWarnings
+
     msg "\nCopying backup information files."
-    awsPutFile "$TMP_PATH/*.*" "$BACKUP_FOLDER/"
+    awsPutFile "$TMP_FOLDER/*.*" "$BACKUP_FOLDER/"
 
     #
     # If it was a full backup make a copy for incrementals to detect

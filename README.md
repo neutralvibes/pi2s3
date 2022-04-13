@@ -25,7 +25,7 @@ As with any backup solution, it is always advisable to test, and check regularly
 
 ## How it works
 
-A full backup is performed at the beginning of each week  (Monday) followed by differentials known as `snapshots` each day for the remaining days. `pi2s3` checks if a full backup has been performed that week regardless of the current day and if not one will be created instead of a snapshot.
+A full backup is performed at the beginning of each week  (Monday) followed by differentials known as `snapshots` each day for the remaining days. `pi2s3` checks if a full backup has been performed that week **regardless** of the current day and if not one will be created instead of a snapshot.
 
 It is totally up to you how often you decide to perform backups, daily, once a week, every few days, scheduled via `cron` or manually.
 
@@ -54,7 +54,6 @@ Before using `pi2s3` we need a working installation of `s3cmd`.
 Install it.
 
 ```bash
-sudo pip install pip --upgrade
 sudo pip installl s3cmd
 ```
 
@@ -118,12 +117,11 @@ Typing `./pi2s3` will show you the options available.
 ./pi2s3
 
 # Prints
-pi2s3 0.0.1 - usage
+Usage: pi2s3 [option]
 
-Creates tar backups to S3 storage
+Create tar backups to S3 storage
 
-Usage:
-    info        pi2s3 info
+    info        Config info
     run         Run backup
     ls          List backup weeks
     ls  [week]  List contents of week folder
@@ -165,10 +163,10 @@ You can of course use the `s3cmd` tool, but for convenience `pi2s3` can save you
 
 # Prints
 # I have removed the date and size columns but they are shown.
-s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_backup_full.apt_installed.lst
+s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_backup_full.apt_installed.lst.gz
 s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_backup_full.tar.gz
-s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_backup_full.tar.gz.lst
-s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_backup_full.warnings.log
+s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_backup_full.lst.gz
+s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_backup_full.warnings.log.gz
 s3://bucket-name/backups/hostname/2022-04-11/2022-04-11_1104_bck.log
 s3://bucket-name/backups/hostname/2022-04-11/backup.snar
 s3://bucket-name/backups/hostname/2022-04-11/backup.snar-1
@@ -205,7 +203,10 @@ To aid in any restore, all the folders/files that have been archived are listed 
 An example of copying an archive listing to the local machine for viewing.
 
 ```bash
-s3cmd get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.tar.gz.lst
+s3cmd get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.lst.gz
+gzip -d 2022-04-05_1403_backup_full.lst.gz
+
+# Creates: 2022-04-05_1403_backup_full.lst
 ```
 
 You can then use `cat`, `less` or `grep` to view it, or other relevant operations to determine if a particular archive contains what you require.
@@ -213,7 +214,7 @@ You can then use `cat`, `less` or `grep` to view it, or other relevant operation
 An example of viewing without storing a local copy.
 
 ```bash
-s3cmd --no-progress get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.tar.gz.lst - | cat
+s3cmd --no-progress get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_1403_backup_full.lst.gz - | zcat
 ```
 
 You could exchange the `cat` in the example for `less` or a `grep` etc. If you may need to perform multiple operations such as searches or views then copying the file locally as mentioned previously would be better.
@@ -232,6 +233,10 @@ s3cmd --no-progress get s3://bucket-name/backups/hostname/2022-04-04/2022-04-05_
 The `folder-to-get1 folder-to-get2` are space separated examples of paths to files and/or folders you wish to retrieve from an archive *specified on the left hand side of the line*.
 
 The `--no-progess` flag is important here, to ensure that the `s3cmd` progress notifications don't corrupt the file.
+
+## Disclaimer
+
+You are free to use this code however you see fit, and FULLY accept that in doing so it is completely at your OWN risk. Further more, your use of this code in part or whole, fully accepts absolving this author of any liability whatsoever.
 
 ## Credits
 
