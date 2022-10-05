@@ -1,0 +1,28 @@
+#/usr/bin/env bash
+_pi2s3_completions()
+{
+#    "COMP_WORDS: $COMP_WORDS, COMP_CWORD: $COMP_CWORD"
+    case $COMP_CWORD in
+        1)
+            COMPREPLY=($(compgen -W "--create edit info log ls lsconfig run rm" "${COMP_WORDS[1]}"))
+            ;;
+        2)
+            COMPREPLY=($(compgen -W "`ls -w0 ~/.pi2s3/`" "${COMP_WORDS[2]}"))
+            # COMPREPLY=($(compgen -d -- "~/.pi2s3/" "${COMP_WORDS[2]}"))
+            ;;
+        3)  
+            case "${COMP_WORDS[1]}" in
+                edit)
+                    COMPREPLY=($(compgen -W "`ls -w0 ~/.pi2s3/${COMP_WORDS[2]}`" "${COMP_WORDS[3]}"))
+                    ;;
+                log)
+                    COMPREPLY=($(compgen -W "`ls -rw0 ~/.pi2s3/${COMP_WORDS[2]}/log/`" "${COMP_WORDS[3]}"))
+                    ;;
+            esac
+            ;;
+        *)
+        ;;
+    esac
+}
+
+complete -F _pi2s3_completions pi2s3

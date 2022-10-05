@@ -6,61 +6,259 @@
 # https://github.com/neutralvibes/pi2s3
 #
 set -o pipefail
-
 VERSION=0.0.1
+
 SCRIPT_NAME=`basename "$0"`
-cd "$(dirname "$0")"
-SCRIPT_PATH=`pwd -P`
+SCRIPT_PATH=${BASH_SOURCE:-$0}
+
+# SCRIPT_PATH=`pwd -P`
+while [ -L "${SCRIPT_PATH}" ]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "${SCRIPT_PATH}")" >/dev/null 2>&1 && pwd)"
+  SCRIPT_PATH="$(readlink "${SCRIPT_PATH}")"
+  [[ ${SCRIPT_PATH} != /* ]] && SCRIPT_PATH="${SCRIPT_DIR}/${SCRIPT_PATH}"
+done
+
+SCRIPT_PATH="$(readlink -f "${SCRIPT_PATH}")"
+SCRIPT_PATH="$(cd -P "$(dirname -- "${SCRIPT_PATH}")" >/dev/null 2>&1 && pwd)"
+cd "$SCRIPT_PATH"
+
+CONFIG_NAME=$2
+USER_DIR="$HOME/.${SCRIPT_NAME}/$CONFIG_NAME"
+USER_CONFIG_DIR="$USER_DIR"
+USER_SCRIPTS_DIR="$USER_DIR"
+USER_CONFIG_FILE="$USER_CONFIG_DIR/config.cfg"
+CONFIG_DIR="$SCRIPT_PATH/config"
+DEFAULTS_FILE="$CONFIG_DIR/.defaults.cfg"
+
+INCLUDE_LIST="$USER_CONFIG_DIR/include.txt"
+EXCLUDE_LIST="$USER_CONFIG_DIR/exclude.txt"
+BEFORE_BACKUP_SCRIPT="$USER_SCRIPTS_DIR/before_backup"
+AFTER_BACKUP_SCRIPT="$USER_SCRIPTS_DIR/after_backup"
+
+USE_EDITOR=nano
+USE_VIEWER=cat
+
+# Remove any temporay files after success and failure
+# Only set to 0 for debugging 
+REMOVE_TMP_FILES=1
 
 usage() {
-    echo "Usage: $SCRIPT_NAME [option]
+    echo "Usage: $SCRIPT_NAME COMMAND CONFIG [options]
 
-Create tar backups to S3 storage
+Create compressed tar backups to S3 storage
+    
+    --create CONFIG     Create new config
 
-    info        Config info
-    run         Run backup
-    ls	        List backup weeks
-    ls	[week]  List contents of week folder
+    edit CONFIG/FILE    Edit config file 
+                        [config.cfg|include.txt|before_backup|after_backup] 
+
+    info CONFIG         Show config info
+    lsconfig            List configurations
+
+    ls	CONFIG          List backup weeks
+    ls	CONFIG [YYYY-MM-DD]  List contents of week folder
+
+    run CONFIG          Run backup
 "
     exit 0
 }
 
-if [[ ! -f config/backup.cfg ]]; then
-    echo "ERROR-NO-CONFIG
-The configuration file is missing.
+storageS3 () {
+    STORAGE_TYPE=S3
+    S3_CMD=s3cmd
 
-Do the following to set this utility up:
+    storagePathExists() {
+        local m="S3 PathExists? $1"
+        $S3_CMD info $1 > /dev/null 2>&1
+        [[ $? -eq 0 ]] && return 0
+        return 1
+    }
 
-cp config/samples/* config/
-cp scripts/samples/* scripts/
-chmod +x pi2s3 scripts/*
+    storageGetFile() { $S3_CMD get $1 $2; }
 
----
-"
+    storage_ls () { $S3_CMD ls $@; }
+
+    storagePutFile() { $S3_CMD $S3_FLAGS put $@; }
+    
+    #export GPG_TTY=$(tty);
+    storageClientEncryption() { S3_FLAGS="${S3_FLAGS:-''} --encrypt "; }
+    
+    storageQuota() {
+        if [ ! -z $KEEP_BACKUP_WEEKS ]; then
+            msg "KEEP_BACKUP_WEEKS = $KEEP_BACKUP_WEEKS, checking excess"
+            prn=$(
+                $S3_CMD ls "${BACKUPS_ROOT_FOLDER}/" |
+                    grep DIR |
+                    sort -r |
+                    awk -v maxWeeks=$KEEP_BACKUP_WEEKS -v ORS="\n" 'NR > maxWeeks {print $2 }'
+            )
+
+            if [[ ! -z "$prn" ]]; then
+                msg "Removing \n$prn"
+                echo -e $prn | xargs -rI {} $S3_CMD rm -r {}
+            else
+                msg "No excess to reomove"
+            fi
+
+        fi
+    }
+
+    storageValidate() {
+        if [ -z $BACKUP_BUCKET ];then
+            echo "BACKUP_BUCKET not specified, chfange it in $USER_CONFIG_FILE"
+            exit 1
+        fi
+        
+        storagePathExists ${BACKUP_BUCKET}
+
+        if [ $? -eq 1 ]; then
+            echo "The S3 bucket, $BACKUP_BUCKET, does not exist."
+            echo "Please make sure you have created the bucket AND/OR, edit $USER_CONFIG_FILE and enter the correct bucket name."
+            exit 1
+        fi
+
+        BACKUPS_ROOT_FOLDER=$BACKUP_BUCKET/$BACKUP_BUCKET_FOLDER
+    }
+}
+
+errorCreate () {
+    echo -e "CREATE-ERROR, Unable to create, $1"
+    echo "Maybe check permissions?"
+    echo "Aborting..."
     exit 1
-fi
+}
+
+writeTemplate () {
+    local ty=${1?Need template type}
+    local name=${2?Need template name}
+    local content=${3?Need template contents create}
+    # local ftw="$USER_SCRIPTS_DIR/${ty}_${name}"
+    local ftw="$USER_SCRIPTS_DIR/${ty}_backup"
+
+    echo -n "Creating file, $ftw ... "
+
+    if [ ! -f "$ftw" ]; then
+        echo "$content" >> "$ftw"
+
+        if [ $? -eq 0 ]; then
+            chmod +x "$ftw" || errorCreate "$ftw"
+            echo "OK"
+        else
+            return 1
+        fi
+    else
+        echo "already exists."
+        return 0
+    fi
+}
+
+beforeTemplate() {
+    writeTemplate before $1 \
+'#!/bin/bash
+#
+# pi2s3:
+#
+#  beforeBackup
+# ===============
+#
+# Place the commands that should be run BEFORE the backup here.
+#
+# WARNING:
+# The exit status is important. If it is not 0 the backup will not start! 
+# Use this to cancel backups if your conditions are not met.
+
+exit 0 
+'
+}
+
+afterTemplate() {
+    writeTemplate after $1 \
+'#!/bin/bash
+#
+# pi2s3:
+#
+#  afterBackup
+# ===============
+#
+#
+
+#
+# Place the commands that should be run AFTER the backup here
+# 
+# PARAMS:
+#   $1 - Receives the status code. 0 = success / 2 = failure.
+#   $2 - Receives name of config that was used
+#
+if [ $1 -ne 2 ]; then
+    echo "${2^}: archive completed successfully."
+else
+    echo "${2^}: archive failed."
+fi'
+}
+
+touchFile()
+{
+    echo -n "Creating file, $1 ... "
+
+    if [ ! -f "$1" ]; then
+        touch "$1"
+        [ $? -ne 0 ] && errorCreate "$1"
+        echo "OK"
+    else
+        echo "already exists."
+    fi
+}
+
+createConfig() {
+    local name=${1?"Need a config name [A-Za-z] to create"}
+
+    if [[ ! -d "$USER_DIR" ]]; then
+        echo -n "Creating config folder for user $(whoami), $USER_DIR ... "
+        mkdir -p "$USER_CONFIG_DIR" "$USER_SCRIPTS_DIR" > /dev/null 2>&1
+        [ $? -ne 0 ] && errorCreate "$USER_CONFIG_DIR and/or $USER_SCRIPTS_DIR"
+        echo "OK"
+    fi
+
+    touchFile "$EXCLUDE_LIST"
+    touchFile "$INCLUDE_LIST"
+    beforeTemplate $1
+    afterTemplate $1
+    echo -n "Creating file, $USER_CONFIG_FILE ... "
+
+    if [ ! -f "$USER_CONFIG_FILE" ]; then
+        cp "$DEFAULTS_FILE" "$USER_CONFIG_FILE"
+        [ $? -ne 0 ] && errorCreate "$USER_CONFIG_FILE"
+        echo "OK"
+    else
+        echo "already exists."
+    fi
+
+    echo "
+    Config for '$1' has been created. Now edit the files listed above with the relevant info.
+    "
+    exit 0
+}
 
 showInfo() {
-    echo -e "
-Version: $VERSION
-Bucket: $BACKUP_BUCKET
-Bucket folder: $BACKUP_BUCKET_FOLDER
-Backup extension: $BACKUP_FILE_EXT
-Keep weeks: $KEEP_BACKUP_WEEKS
-Include list: $INCLUDE_LIST
-Exclude list: $EXCLUDE_LIST
-After backup: $AFTER_BACKUP_SCRIPT
-Before backup: $BEFORE_BACKUP_SCRIPT
-Max backup logs: $MAX_BACKUP_LOGS
-Check is root: $(showYesNo $CHECK_ROOT)
-Save apt list: $(showYesNo $CREATE_APT_INSTALLED)
-Temp path: $TMP_PATH
-S3 command: $S3_CMD
-"
-    exit 0
+    local out=$1
+    $out "Version: $VERSION"
+    $out "Config: $USER_CONFIG_DIR/$CONFIG_NAME.cfg"
+    $out "Bucket: $BACKUP_BUCKET"
+    $out "Bucket folder: $BACKUP_BUCKET_FOLDER"
+    $out "Backup extension: $BACKUP_FILE_EXT"
+    $out "Create snapshots: $(showYesNo $BACKUP_SNAPSHOTS_ENABLED)"
+    $out "Encrytion Local: $(showYesNo $CLIENT_ENCRYPTION_ENABLED)"
+    $out "Keep weeks: $KEEP_BACKUP_WEEKS"
+    $out "Include: $(wc -l < $INCLUDE_LIST) in $INCLUDE_LIST"
+    $out "Exclude: $(wc -l < $EXCLUDE_LIST) in $EXCLUDE_LIST"
+    $out "After backup: $AFTER_BACKUP_SCRIPT"
+    $out "Before backup: $BEFORE_BACKUP_SCRIPT"
+    $out "Max backup logs: $MAX_BACKUP_LOGS"
+    $out "Save apt list: $(showYesNo $CREATE_APT_INSTALLED)"
+    $out "Temp path: $TMP_PATH"
 }
 
-showYesNo() { [ $1 -eq 0 ] && echo "no" || echo "yes"; }
+showYesNo() { [ $1 -eq 0 ] && echo "No" || echo "Yes"; }
 
 msg() {
     local dte=$(date +"%F %T")
@@ -79,289 +277,333 @@ elapsedTime() {
     echo $hours hours, $minutes minutes, $seconds seconds
 }
 
-
 failed() {
     msg "BACKUP-FAILED for host, [$HOSTNAME]"
+    removeTemporaryFiles
     exit 1
 }
-
-awsPathExists() {
-    local m="S3 PathExists? $1"
-    $S3_CMD info $1 > /dev/null 2>&1
-    [[ $? -eq 0 ]] && return 0
-    return 1
-}
-
-awsGetFile() { $S3_CMD get $1 $2; }
-awsPutFile() { $S3_CMD put $1 $2; }
 
 canIRun() {
     [ -f "$1" ] && [ -x "$1" ] && return 0
     return 1
 }
 
-source config/backup.cfg
+configLoad() {
+    source "$DEFAULTS_FILE"
 
-BACKUPS_ROOT_FOLDER=$BACKUP_BUCKET/$BACKUP_BUCKET_FOLDER
+    if [[ -z $CONFIG_NAME ]]; then
+        echo "ERROR-NEED-CONFIG: Config not specified."
+        usage
+    fi
 
-
-
-awsPathExists ${BACKUP_BUCKET}
-
-if [ $? -eq 1 ]; then
-    echo "The S3 bucket, $BACKUP_BUCKET, does not exist."
-    echo "Please make sure you have created the bucket AND/OR, edit config/backup.cfg and enter the correct bucket name."
-    exit 1
-fi
-
-[[ -z $1 ]] && usage
-
-if [ $1 == 'ls' ]; then
-    if [ -z $2 ]; then
-        $S3_CMD ls $BACKUPS_ROOT_FOLDER/
+    if [[ -f "$USER_CONFIG_FILE" ]]; then
+        source "$USER_CONFIG_FILE"
     else
-        $S3_CMD ls $BACKUPS_ROOT_FOLDER/$2/$3
+        echo "ERROR: Config does not exist, $CONFIG_NAME"
+        echo "
+The configuration file is missing.
+
+Please use the correct config name
+    OR
+Do the following to set this utility up:
+
+./$SCRIPT_NAME --create-config [name]
+
+---
+"
+        exit 1
+    fi
+
+    storageValidate
+}
+
+removeTemporaryFiles () {
+    if [ ! -z "$TMP_FOLDER" ] && [ $REMOVE_TMP_FILES -eq 1 ]; then
+        rm -r "$TMP_FOLDER"
+    fi 
+}
+
+runBackup() {
+    TMP_FOLDER="$TMP_PATH/${SCRIPT_NAME}_$(date +'%s')"
+
+    mkdir -p $LOCAL_LOG_PATH
+
+    startPath=$PWD
+    startSecs=$SECONDS
+
+    DATE_SHORT=$(date +"%F_%H%M")
+    startDateTime=$(date +"%F_%H%M")
+    export LOG_FILE=$LOCAL_LOG_PATH/${startDateTime}_bck.log
+
+    #
+    # If LOGS_ENABLED not defined turn it off
+    #
+    if [ -z $LOGS_ENABLED ]; then
+        export LOGS_ENABLED=0
+    fi
+
+    #
+    # If Monday create folder and set working folder
+    #
+    msg "\n\n*** STARTING BACKUP ***"
+    showInfo msg
+    msg "Backup running under account, $USER"
+
+    if [ $LOGS_ENABLED -eq 0 ]; then
+        msg "Log file disabled"
+    else
+        msg "Log file enabled"
+    fi
+
+    #
+    # Check LOCAL_LOG_PATH
+    #
+    if [ ! -d "$LOCAL_LOG_PATH" ]; then
+        msg "FOLDER-NOT-PRESENT Creating folder, $LOCAL_LOG_PATH"
+        mkdir -p $LOCAL_LOG_PATH
+    fi
+
+    #
+    # Check local TMP_FOLDER
+    #
+    if [ ! -d "$TMP_FOLDER" ]; then
+        msg "Creating tmp folder, $TMP_FOLDER"
+        mkdir -p $TMP_FOLDER
+    fi
+
+    #
+    # Set backups destination folder
+    # ===============================
+    #
+    # If it's a Monday, select new week folder
+    #
+    if [ $(date +"%w") -eq 1 ]; then
+        BACKUP_FOLDER=${BACKUPS_ROOT_FOLDER}/$(date +"%F")
+    else
+        # Not Monday, use last Monday's date folder.
+        BACKUP_FOLDER=${BACKUPS_ROOT_FOLDER}/$(date -dlast-monday +"%F")
+    fi
+
+    #
+    # Snapshot file.
+    #
+    snarName=backup.snar
+    snar=$BACKUP_FOLDER/$snarName
+
+    #
+    # Snapshot file to use for backup.
+    #
+    useSnar="$TMP_FOLDER/$snarName"
+
+    #
+    # If the snapshot is present a full backup is already in folder.
+    #
+    fn=${DATE_SHORT} #Filename
+
+    #
+    # Backup mode (works out mode internally)
+    #   0 = full / 1 = incremental
+    #
+    backupMode=0
+
+    if [ ! -f "$INCLUDE_LIST" ]; then
+        msg "NO-INCLUDE_LIST, $INCLUDE_LIST"
+        msg "Cannot proceed."
+        failed
+    fi
+
+    if [ ! -f "$EXCLUDE_LIST" ]; then
+        msg "NO-EXCLUDE_LIST, $EXCLUDE_LIST"
+        EXCLUSIONS_PARAM=""
+    else 
+        EXCLUSIONS_PARAM="--exclude-from=$EXCLUDE_LIST"
+    fi
+
+    msg "You have 10 seconds to abort (ctrl-c) or backup will start."
+    sleep 10
+
+    if canIRun "$BEFORE_BACKUP_SCRIPT"; then
+        msg "Executing BEFORE backup tasks"
+        $BEFORE_BACKUP_SCRIPT
+    else
+        msg "Either no BEFORE backup tasks or not executable."
+    fi
+
+    [[ $CLIENT_ENCRYPTION_ENABLED -eq 1 ]] && storageClientEncryption
+
+    storagePathExists "${snar}-1"
+
+    if [ $? -eq 0 ]; then
+        msg "Incremental file IS present, will create a snapshot."
+        fn+=_backup_snapshot
+        backupMode=1
+        # get backup snar to do level 1 from
+
+        msg "Copying incremental file locally to use."
+        storageGetFile $snar "$TMP_FOLDER/${snarName}-1"
+
+        # We want to use the copy of the original snar file.
+        useSnar="${TMP_FOLDER}/${snarName}-1"
+    else
+        msg "Incremental file NOT present, will do full backup."
+        fn+=_backup_full
+
+    fi
+
+    pathToFile="$BACKUP_FOLDER/${fn}.$BACKUP_FILE_EXT"
+
+    # Full path to report
+    pathToLog="$TMP_FOLDER/$fn.$BACKUP_FILE_EXT.log"
+
+    # Full path to log
+    pathToReport="$TMP_FOLDER/$fn.lst"
+
+    # Fullpath to error log
+    pathToWarnings="$TMP_FOLDER/$fn.warnings.log"
+
+    msg "Running backup....."
+    msg "Using snapshot $useSnar"
+
+    #
+    # Make a list of installed packages
+    #
+    if [ ! -z $CREATE_APT_INSTALLED ] && [ $CREATE_APT_INSTALLED -eq 1 ]; then
+        msg "Saving list of APT packages installed."
+        apt list --installed | gzip -9 > "$TMP_FOLDER/$fn.apt_installed.lst.gz"
+    fi
+
+    echo "$S3_CMD $S3_FLAGS";
+
+    msg "Executing tar"
+
+    /bin/tar -czpSva --verbose \
+        --exclude="$TMP_FOLDER" \
+        $EXCLUSIONS_PARAM \
+        --files-from=$INCLUDE_LIST \
+        --totals \
+        --index-file="$pathToReport" \
+        --listed-incremental=$useSnar 2> $pathToWarnings |
+        storagePutFile - $pathToFile
+
+    statusCode=$?
+
+    msg "Backup status code: $statusCode"
+
+    if [ $statusCode -ne 2 ]; then
+        
+        # Compress index list
+        gzip -9 $pathToReport
+
+        # Compress warnings
+        gzip -9 $pathToWarnings
+
+        msg "Copying backup information files."
+        storagePutFile "$TMP_FOLDER/*.*" "$BACKUP_FOLDER/"
+
+        #
+        # If it was a full backup make a copy for incrementals to detect
+        #
+        if [ $backupMode -eq 0 ]; then
+            storagePutFile "$useSnar" "$BACKUP_FOLDER/${snarName}-1"
+        fi
+    else
+        msg "`cat $pathToWarnings`"
+    fi
+
+    if canIRun "$AFTER_BACKUP_SCRIPT"; then
+        msg "Executing AFTER backup tasks"
+        $AFTER_BACKUP_SCRIPT $statusCode "$CONFIG_NAME"
+    else
+        msg "Either no AFTER backup tasks or not executable."
+    fi
+
+    [ $statusCode -eq 2 ] && failed
+
+    #
+    # clean up excess log files
+    #
+    numToRemove=$((MAX_BACKUP_LOGS + 1))
+    storePath=$PWD
+    cd $LOCAL_LOG_PATH
+    ls -tp | grep -v '/$' | tail -n +${numToRemove} | xargs -d '\n' -r rm -v --
+    cd $storePath
+    storageQuota
+    removeTemporaryFiles
+    msg "*** Backup finished in $(elapsedTime) ***"c
+
+    #
+    # Upload log file
+    #
+    if [ $LOGS_ENABLED -eq 1 ]; then
+        storagePutFile "$LOG_FILE" "$BACKUP_FOLDER/"
     fi
     exit 0
-elif [ $1 == 'info' ]; then
-    showInfo
-elif [ $1 != 'run' ]; then
-    usage
-fi
+}
 
-if [ $CHECK_ROOT -eq 1 ] && [ $(id -u) -ne 0 ]; then
-    echo "-- BACKUP FAILED, configured to run as root, perhaps use 'sudo $SCRIPT_NAME', exiting..."
-    exit 1
-fi
-
-mkdir -p $LOCAL_LOG_PATH
-
-startPath=$PWD
-startSecs=$SECONDS
-
-DATE_SHORT=$(date +"%F_%H%M")
-startDateTime=$(date +"%F_%H%M")
-export LOG_FILE=$LOCAL_LOG_PATH/${startDateTime}_bck.log
+storageS3
 
 #
-# If LOGS_ENABLED not defined turn it off
+# Command line
 #
-if [ -z $LOGS_ENABLED ]; then
-    export LOGS_ENABLED=0
-fi
+case $1 in
+    --create)
+        createConfig $2
+        ;;
+    ls|info|run)
+        configLoad
+        case $1 in
+            ls)
+                if [ -z $3 ]; then
+                    storage_ls $BACKUPS_ROOT_FOLDER/
+                else
+                    storage_ls $BACKUPS_ROOT_FOLDER/$3/$4
+                fi
+                exit 0
+                ;;
+            info)
+                showInfo echo
+                exit 0
+                ;;
+            run)
+                runBackup
+                ;;
 
-#
-# If Monday create folder and set working folder
-#
-msg "\n\n*** STARTING BACKUP ***"
-msg "Backup running under $USER account"
+            esac
+        ;;
+    lsconfig)
+        echo "Configs listing"
+        echo "==============="
 
-if [ $LOGS_ENABLED -eq 0 ]; then
-    msg "Log file disabled"
-else
-    msg "Log file enabled"
-fi
+        if [[ -d ~/.${SCRIPT_NAME} ]]; then
+            ls ~/.${SCRIPT_NAME}/ -1 --color=none
+        else
+            echo No configs created
+        fi
 
-#
-# Check LOCAL_LOG_PATH
-#
-if [ ! -d "$LOCAL_LOG_PATH" ]; then
-    msg "FOLDER-NOT-PRESENT Creating folder, $LOCAL_LOG_PATH"
-    mkdir -p $LOCAL_LOG_PATH
-fi
+        exit 0
+        ;;
+    edit)
+        editfile="$USER_CONFIG_DIR"
+        echo $editfile
+        [ -f "$editfile" ] && $USE_EDITOR $editfile || echo "File location does not exist, $editfile"
+        ;;
 
-TMP_FOLDER="$TMP_PATH/${SCRIPT_NAME}_tmp"
+    log)
+        logfile="$USER_CONFIG_DIR/log/$3"
+        echo $logfile
+        [ -f "$logfile" ] && $USE_VIEWER $logfile || echo "File location does not exist, $logfile"
+        ;;
 
-#
-# Check local TMP_FOLDER
-#
-if [ ! -d "$TMP_FOLDER" ]; then
-    msg "FOLDER-NOT-PRESENT Creating tmp folder, $TMP_FOLDER"
-    mkdir -p $TMP_FOLDER
-else
-    msg "Cleaning folder, $TMP_FOLDER"
-    rm $TMP_FOLDER/*.* > /dev/null 2>&1
-fi
-
-#
-# Set backups destination folder
-# ===============================
-#
-# If it's a Monday, select new week folder
-#
-if [ $(date +"%w") -eq 1 ]; then
-    BACKUP_FOLDER=${BACKUPS_ROOT_FOLDER}/$(date +"%F")
-else
-    # Not Monday, use last Monday's date folder.
-    BACKUP_FOLDER=${BACKUPS_ROOT_FOLDER}/$(date -dlast-monday +"%F")
-fi
-
-#
-# Snapshot file.
-#
-snarName=backup.snar
-snar=$BACKUP_FOLDER/$snarName
-
-#
-# Snapshot file to use for backup.
-#
-useSnar="$TMP_FOLDER/$snarName"
-
-#
-# If the snapshot is present a full backup is already in folder.
-#
-fn=${DATE_SHORT} #Filename
-
-#
-# Backup mode (works out mode internally)
-#   0 = full / 1 = incremental
-#
-backupMode=0
-
-if [ ! -f "$INCLUDE_LIST" ]; then
-    msg "NO-INCLUDE_LIST, $INCLUDE_LIST"
-    msg "Cannot proceed."
-    failed
-else 
-    msg "Include list: $INCLUDE_LIST"
-fi
-
-if [ ! -f "$EXCLUDE_LIST" ]; then
-    msg "NO-EXCLUDE_LIST, $EXCLUDE_LIST"
-    EXCLUSIONS_PARAM=""
-else 
-    EXCLUSIONS_PARAM="--exclude-from=$EXCLUDE_LIST"
-fi
-
-msg "You have 10 seconds to abort (ctrl-c) or backup will start.\n"
-sleep 10
-
-if canIRun "$BEFORE_BACKUP_SCRIPT"; then
-    msg "Executing BEFORE backup tasks"
-    $BEFORE_BACKUP_SCRIPT
-else
-    msg "Either no BEFORE backup tasks or not executable."
-fi
-
-awsPathExists "${snar}-1"
-
-if [ $? -eq 0 ]; then
-    msg "Incremental file IS present, will create a snapshot."
-    fn+=_backup_snapshot
-    backupMode=1
-    # get backup snar to do level 1 from
-
-    msg "Copying incremental file locally to use."
-    awsGetFile $snar $TMP_FOLDER/${snarName}-1
-
-    # We want to use the copy of the original snar file.
-    useSnar="${TMP_FOLDER}/${snarName}-1"
-else
-    msg "Incremental file NOT present, will do full backup."
-    fn+=_backup_full
-
-fi
-
-pathToFile="$BACKUP_FOLDER/${fn}.$BACKUP_FILE_EXT"
-
-# Full path to report
-pathToLog="$TMP_FOLDER/$fn.$BACKUP_FILE_EXT.log"
-
-# Full path to log
-pathToReport="$TMP_FOLDER/$fn.lst"
-
-# Fullpath to error log
-pathToWarnings="$TMP_FOLDER/$fn.warnings.log"
-
-msg "Running backup....."
-msg "Using snapshot $useSnar"
-
-#
-# Make a list of installed packages
-#
-if [ ! -z $CREATE_APT_INSTALLED ] && [ $CREATE_APT_INSTALLED -eq 1 ]; then
-    msg "Saving list of APT packages installed."
-    sudo apt list --installed | gzip -9 > $TMP_FOLDER/$fn.apt_installed.lst.gz
-else
-    msg "Create APT installed list, disabled."
-fi
-
-sudo /bin/tar -czpSva \
-    --exclude="$TMP_FOLDER" \
-    $EXCLUSIONS_PARAM \
-    --files-from=$INCLUDE_LIST \
-    --totals \
-    --index-file="$pathToReport" \
-    --listed-incremental=$useSnar 2> $pathToWarnings |
-    awsPutFile - $pathToFile
-
-statusCode=$?
-
-msg "Backup status code: $statusCode"
-
-if [ $statusCode -ne 2 ]; then
-    
-    # Compress index list
-    gzip -9 $pathToReport
-
-    # Compress warnings
-    gzip -9 $pathToWarnings
-
-    msg "\nCopying backup information files."
-    awsPutFile "$TMP_FOLDER/*.*" "$BACKUP_FOLDER/"
-
-    #
-    # If it was a full backup make a copy for incrementals to detect
-    #
-    if [ $backupMode -eq 0 ]; then
-        awsPutFile "$useSnar" "$BACKUP_FOLDER/${snarName}-1"
-    fi
-fi
-
-if canIRun "$AFTER_BACKUP_SCRIPT"; then
-    msg "Executing AFTER backup tasks"
-    $AFTER_BACKUP_SCRIPT $statusCode
-else
-    msg "Either no AFTER backup tasks or not executable."
-fi
-
-[ $statusCode -eq 2 ] && failed
-
-#
-# clean up excess log files
-#
-numToRemove=$((MAX_BACKUP_LOGS + 1))
-storePath=$PWD
-cd $LOCAL_LOG_PATH
-ls -tp | grep -v '/$' | tail -n +${numToRemove} | xargs -d '\n' -r rm -v --
-cd $storePath
-
-#
-# Remove old  weeks if enabled
-#
-if [ ! -z $KEEP_BACKUP_WEEKS ]; then
-    msg "KEEP_BACKUP_WEEKS = $KEEP_BACKUP_WEEKS, removing any excess"
-
-    prn=$(
-        $S3_CMD ls ${BACKUPS_ROOT_FOLDER}/ |
-            grep DIR |
-            sort -r |
-            awk -v maxWeeks=$KEEP_BACKUP_WEEKS -v ORS="\n" 'NR > maxWeeks {print $2 }'
-    )
-
-    if [[ ! -z "$prn" ]]; then
-        msg "Removing \n$prn"
-        echo -e $prn | xargs -rI {} $S3_CMD rm -r {}
-    else
-        msg "No excess to reomove"
-    fi
-fi
-
-msg "*** Backup finished in $(elapsedTime) ***"
-
-#
-# Upload log file
-#
-if [ $LOGS_ENABLED -eq 1 ]; then
-    awsPutFile "$LOG_FILE" "$BACKUP_FOLDER/"
-fi
+    rm)
+        echo -n "Remove configuration $CONFIG_NAME? [N] "
+        read ans
+        if [[ "$ans" =~ ^[yY]$ ]]; then
+            rm -rv $USER_CONFIG_DIR
+        else
+            echo Aborted...
+        fi
+        ;;        
+    *)
+        usage
+        ;;
+esac

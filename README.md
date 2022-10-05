@@ -51,13 +51,7 @@ Before using `pi2s3` we need a working installation of `s3cmd`.
 
 [s3cmd](https://s3tools.org/s3cmd) is a python utility widely used to write to and from S3 storage. `pi2s3` uses the `s3cmd` utility to communicate with your chosen S3 compatible storage provider.
 
-Install it.
-
-```bash
-sudo pip installl s3cmd
-```
-
-Once `s3cmd` has been installed you need to configure it using the details supplied by your provider.
+Installation instructions [here](https://github.com/s3tools/s3cmd/blob/master/INSTALL.md)
 
 ```bash
 s3cmd --configure
